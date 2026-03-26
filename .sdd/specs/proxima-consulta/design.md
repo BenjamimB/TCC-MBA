@@ -144,13 +144,18 @@ graph TB
 | Banco de dados | PostgreSQL 16 | Persistência principal | Constraints de unicidade como backstop |
 | Cache / Lock / Queue | Redis 7 + BullMQ | Reserva de slots, estado de conversação, jobs agendados | SET NX EX para locks |
 | WhatsApp | Meta WhatsApp Cloud API | Canal de mensagens com pacientes | Templates pré-aprovados para proativas |
-| LLM (roteamento) | Claude Haiku 4.5 | Detecção de intenção (~0,5s por chamada) | Baixo custo por chamada |
-| LLM (orquestração) | Claude Sonnet 4.6 | Tool calling, geração de resposta | Contexto 200k tokens |
+| Orquestração IA | LangChain.js (`@langchain/community`, `@langchain/anthropic`) | Roteamento multi-provedor, fallback chains, LCEL pipelines | Maritaca via `ChatOpenAI` com `baseURL` customizada |
+| LLM primário (roteamento) | Maritaca Sabiá-3-small | Detecção de intenção em PT-BR (~0,5s por chamada) | API OpenAI-compatible; ~R$1–2/M tokens input — custo ~5× menor que Claude Haiku |
+| LLM fallback (roteamento) | Claude Haiku 4.5 | Fallback automático via LangChain `.withFallbacks()` se Maritaca indisponível | |
+| LLM primário (orquestração) | Maritaca Sabiá-3 | Tool calling, geração de resposta em PT-BR | Contexto 32k tokens; melhor benchmark PT-BR vs GPT-4o |
+| LLM fallback (orquestração) | Claude Sonnet 4.6 | Fallback automático via LangChain se Maritaca indisponível | Contexto 200k tokens |
 | Pagamento | Asaas | PIX recorrente, boleto, cartão, assinaturas | Único com PIX recorrente nativo no Brasil |
 | Calendário | Google Calendar API v3 + Microsoft Graph v1.0 | Sincronização bidirecional | Webhook push para eventos |
 | Auth | JWT (Access 15min + Refresh 7d) + TOTP (2FA) | Autenticação de profissionais | bcrypt custo 12 para senhas |
 | Email | Resend | E-mails transacionais (verificação, reset, alertas) | |
-| Infraestrutura | Node.js 20 LTS | Runtime | Deploy via Docker + Railway/Render |
+| Cloud | Railway | Compute, PostgreSQL gerenciado, Redis gerenciado — stack completa | Plano Hobby (~$5–15/mês); Pro (~$20–40/mês) com backups automáticos |
+| CI/CD | GitHub Actions | Build, test e deploy automatizados | `RAILWAY_TOKEN` + `railway up` via GHA workflow |
+| Runtime | Node.js 20 LTS | Runtime do backend NestJS | Containerizado via Dockerfile |
 
 ---
 
@@ -418,7 +423,7 @@ interface IConversationOrchestrator {
 
 | Campo | Detalhe |
 |-------|---------|
-| Intent | Detectar intenção com Claude Haiku e gerar respostas com Claude Sonnet via tool calling |
+| Intent | Detectar intenção e gerar respostas via LangChain.js com Maritaca Sabiá como primário e Claude como fallback |
 | Requirements | 4.1, 4.2, 4.3, 4.5 |
 
 **Contratos**: Service [x]
@@ -456,8 +461,10 @@ interface IAITriageService {
 ```
 
 **Notas de Implementação**
-- `detectIntent` usa Claude Haiku (baixa latência, baixo custo).
-- `executeWithTools` usa Claude Sonnet 4.6 para fluxos com tool calling.
+- Orquestração via **LangChain.js** com LCEL pipelines e `.withFallbacks()` para troca automática de provedor.
+- `detectIntent` usa **Maritaca Sabiá-3-small** como primário (baixo custo, ~R$1–2/M tokens, melhor benchmark PT-BR); fallback automático para **Claude Haiku 4.5** se Maritaca indisponível.
+- `executeWithTools` usa **Maritaca Sabiá-3** como primário; fallback para **Claude Sonnet 4.6** para fluxos com tool calling.
+- Maritaca API é OpenAI-compatible: integrada via `ChatOpenAI` com `configuration.baseURL = "https://chat.maritaca.ai/api"`.
 - Prompts incluem o estado da conversa como JSON estruturado — nunca o histórico completo de mensagens.
 - Risco: latência acima de 5s em picos → mitigação: enviar typing indicator imediatamente e processar de forma assíncrona.
 
@@ -805,7 +812,7 @@ interface AsaasWebhookEvent {
 | Componente | Camada | Intent | Req Cobertos |
 |-----------|--------|--------|-------------|
 | WhatsAppGateway | Adapter | Envia mensagens e valida webhooks do Meta WhatsApp Cloud API | 4.x, 5.x, 6.x, 9.x |
-| AIGateway | Adapter | Chamadas ao Anthropic Claude (Haiku + Sonnet) | 4.x |
+| AIGateway | Adapter | Chamadas a provedores LLM via LangChain.js (Maritaca primário, Claude fallback) | 4.x |
 | CalendarGateway | Adapter | Google Calendar API v3 + Microsoft Graph v1.0 | 2.x |
 | PaymentGateway | Adapter | Asaas API para clientes, assinaturas e cobranças | 13.x |
 | AuditLogService | Cross-cutting | Registra ações críticas imutavelmente | RNF-05 |
@@ -823,10 +830,18 @@ interface IWhatsAppGateway {
 
 ##### AIGateway Port Interface
 ```typescript
+type AIProvider = 'maritaca-small' | 'maritaca' | 'claude-haiku' | 'claude-sonnet';
+
 interface IAIGateway {
-  complete(model: 'haiku' | 'sonnet', messages: AIMessage[], tools?: AITool[]): Promise<Result<AIResponse>>;
+  complete(
+    provider: AIProvider,
+    messages: AIMessage[],
+    tools?: AITool[]
+  ): Promise<Result<AIResponse>>;
 }
 ```
+- Implementação usa LangChain.js internamente: `maritaca-small` e `maritaca` via `ChatOpenAI` com `baseURL` customizada; `claude-haiku` e `claude-sonnet` via `@langchain/anthropic`.
+- Fallback configurado no nível do chain: `.withFallbacks([claudeModel])` garante continuidade se Maritaca retornar erro.
 
 ##### CalendarGateway Port Interface
 ```typescript
@@ -1126,8 +1141,61 @@ INDEX idx_audit_professional ON audit_log(professional_id, created_at)
 | Sync calendário externo | ≤ 60s | Webhooks push (Google/Outlook) em vez de polling periódico |
 | Confirmação agendamento | ≤ 10s | Processamento síncrono do booking após confirmação do paciente |
 | Notificação lista de espera | ≤ 30s após cancelamento | Evento `AppointmentCancelled` → WaitlistService via EventEmitter NestJS |
-| Disponibilidade | 99,9% | Deploy com redundância (Railway/Render com auto-restart); Redis Sentinel ou Upstash |
+| Disponibilidade | 99,9% | Railway com auto-restart habilitado; Redis gerenciado pelo Railway com persistência |
 
 **Escalabilidade horizontal**: o backend NestJS é stateless (estado da conversa no Redis, não em memória). Múltiplas instâncias podem processar webhooks WhatsApp sem conflito desde que Redis seja compartilhado.
 
 **Concorrência de slots**: `SET NX EX` no Redis garante exclusividade atômica; constraint `UNIQUE(professional_id, start_at)` no PostgreSQL é o backstop final.
+
+---
+
+## Infraestrutura e Deploy
+
+### Cloud Provider: Railway
+
+Railway hospeda o stack completo do MVP em um único provider:
+
+| Serviço | Configuração | Observações |
+|---------|-------------|-------------|
+| Backend NestJS | Serviço Docker, auto-deploy no push para `main` | Health check em `GET /health` |
+| PostgreSQL 16 | Plugin gerenciado Railway | Encryption at rest habilitada; backups diários no plano Pro |
+| Redis | Plugin gerenciado Railway | Persistência AOF habilitada para durabilidade de filas BullMQ |
+| Frontend Next.js | Serviço separado no mesmo projeto Railway | Ou Vercel (deploy automático, CDN global) |
+
+**Plano recomendado**: Pro (~$20–40/mês) para backups automáticos do PostgreSQL. Aplicar ao Railway Startup Credits (~$1.000).
+
+### Ambientes
+
+| Ambiente | Branch | Finalidade |
+|----------|--------|-----------|
+| `staging` | `develop` | Validação de features antes de produção; dados sintéticos |
+| `production` | `main` | Usuários reais; variáveis de ambiente separadas |
+
+### CI/CD: GitHub Actions
+
+Pipeline mínimo com dois estágios:
+
+```yaml
+# .github/workflows/deploy.yml (estrutura)
+on:
+  push:
+    branches: [main, develop]
+
+jobs:
+  test:
+    # 1. Install deps → lint → unit tests → integration tests
+  deploy:
+    needs: test
+    # 2. railway up --service backend --environment ${{ env.RAILWAY_ENV }}
+    # RAILWAY_TOKEN no GitHub Secrets; RAILWAY_ENV = staging | production
+```
+
+- Branch `develop` → deploy automático em `staging`
+- Branch `main` → deploy automático em `production` (após testes passarem)
+- Migrations Prisma executadas como parte do deploy: `prisma migrate deploy`
+
+### Gestão de Configuração
+
+- Variáveis de ambiente gerenciadas por ambiente no painel Railway (nunca commitadas)
+- Secrets sensíveis: `DATABASE_URL`, `REDIS_URL`, `MARITACA_API_KEY`, `ANTHROPIC_API_KEY`, `WHATSAPP_TOKEN`, `ASAAS_TOKEN`, `JWT_PRIVATE_KEY`
+- `JWT_PRIVATE_KEY` (RS256): gerado e armazenado como variável Railway; nunca em arquivo
