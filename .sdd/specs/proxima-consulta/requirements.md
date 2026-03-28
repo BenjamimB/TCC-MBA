@@ -45,6 +45,30 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - Alterações salvas devem ser propagadas ao Motor de IA em no máximo **5 segundos**.
 - A tela de configuração deve carregar e responder a interações em no máximo **2 segundos**.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `professional_id`, `day_of_week` (enum MON–SUN / 0–6), `is_active`, `start_time`, `end_time`, `slot_duration_minutes`, `break_between_slots_minutes` (default 0), `min_advance_hours`, `updated_at`
+
+**Regras de Validação**
+- `end_time > start_time`
+- `slot_duration_minutes ≥ 15`
+- `break_between_slots_minutes ≥ 0`
+- Unicidade `(professional_id, day_of_week)` → upsert, não duplicata
+- Slot em fluxo ativo: honrar TTL da reserva Redis antes de aplicar nova config (AC 1.6)
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| `end_time ≤ start_time` | 422 "Horário de fim deve ser posterior ao de início" |
+| `slot_duration_minutes < 15` | 422 "Duração mínima é 15 minutos" |
+| Propagação ao Motor IA > 5s | Retry automático 3×; alerta ao profissional se persistir |
+
+**Target de Performance**
+- Carregamento da tela de configuração: ≤ 2s
+- Save + propagação ao Motor IA: ≤ 5s
+- Response da API de save: ≤ 500ms
+
 ---
 
 ### Requisito 2: Sincronização de Calendário Externo
@@ -63,6 +87,34 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - A sincronização de eventos externos deve ocorrer em no máximo **60 segundos** após criação ou atualização no calendário externo.
 - Operações de sincronização devem ser idempotentes: falhas parciais não devem corromper nem duplicar dados existentes.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `professional_id`, `provider` (google | outlook), `access_token` + `refresh_token` (encriptados AES-256-GCM), `token_expires_at`, `calendar_id`, `last_sync_at`, `sync_status`
+- Por evento bloqueado: `external_event_id`, `start_at`, `end_at`
+- `oauth_state` (CSRF, Redis TTL 5min, descartado após uso)
+
+**Regras de Validação**
+- `oauth_state` CSRF válido e não expirado antes de aceitar callback
+- `email_verified: true` no token Google
+- `external_event_id` único por `professional_id` → upsert idempotente
+- Conflito de slot: lock Redis `SET NX` + `UNIQUE(professional_id, start_at)` (AC 2.6)
+- Tokens nunca retornados em API response nem logados
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Token expirado e refresh falhou | `sync_status = error`, notificar profissional, manter última disponibilidade (AC 2.4) |
+| API externa 429 | Backoff exponencial: 30s → 60s → 120s |
+| API externa 5xx (3× consecutivo) | Fallback para última disponibilidade + alerta ao profissional |
+| Webhook duplicado | Upsert por `external_event_id` — sem duplicata |
+| State CSRF inválido no callback | 400 + log de segurança; sem criar integração |
+
+**Target de Performance**
+- Sync após evento externo: ≤ 60s
+- Import inicial (calendário com ≤ 100 eventos futuros): ≤ 10s
+- Exportar evento após `AppointmentCreated`: ≤ 5s
+
 ---
 
 ### Requisito 3: Dashboard de Visualização da Agenda
@@ -80,6 +132,32 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - O dashboard deve carregar e exibir os agendamentos em no máximo **2 segundos** em conexão padrão (4G/broadband).
 - Atualizações em tempo real devem ter latência máxima de **5 segundos** entre o evento e a atualização visual no painel.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- Por appointment: `id`, `patient_name`, `patient_phone`, `start_at`, `end_at`, `appointment_type`, `status`, `notes`
+- Indicadores de ocupação: total de slots disponíveis vs. ocupados por dia
+- Stream SSE de eventos: `AppointmentCreated`, `AppointmentCancelled`, `AppointmentConfirmed`, `AppointmentRescheduled`
+
+**Regras de Validação**
+- JWT válido; profissional acessa apenas seus próprios dados
+- Range máximo de consulta: 7 dias para visão semanal
+- SSE autenticado via Bearer token no header ou query param seguro
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Falha no carregamento inicial | Skeleton + botão "Tentar novamente" |
+| SSE desconectado | Reconexão automática (EventSource nativo com backoff) |
+| Appointment deletado enquanto visualizando | 404 → fechar painel de detalhes + "Consulta não encontrada" |
+| Token SSE expirado | Reconectar silenciosamente com novo token |
+
+**Target de Performance**
+- Carregamento inicial: ≤ 2s
+- Latência SSE (evento → atualização visual): ≤ 5s
+- API de appointments (range 1 semana): ≤ 200ms
+- API de detalhes de um appointment: ≤ 100ms
+
 ---
 
 ### Requisito 4: Triagem Inteligente via WhatsApp
@@ -96,6 +174,36 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 #### Requisitos Não Funcionais
 - O Motor de IA deve enviar a primeira resposta ao paciente em no máximo **5 segundos** após o recebimento da mensagem.
 - O Motor de IA deve estar disponível 24/7; em caso de indisponibilidade do serviço de IA, o sistema deve enviar mensagem automática de fallback ao paciente e notificar o profissional.
+
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- Mensagem do paciente: `text`, `timestamp`, `from`, `to`
+- Estado da conversa no Redis: `state`, `intent_history`, `patient_id`, `professional_id`, `context_json`
+- Perfil do paciente (recuperado do PatientService)
+- Configuração do profissional: `min_advance_hours`, `clinic_address`
+
+**Regras de Validação**
+- `X-Hub-Signature-256` (HMAC-SHA256) válida — obrigatória antes de qualquer processamento
+- `professional_id` derivado internamente do `phone_number_id` do webhook (não do payload do cliente)
+- `confidence ≥ 0.7` para roteamento direto; abaixo → solicitar esclarecimento (AC 4.3)
+- Lock por chave de conversa: máximo de 1 mensagem processada por vez por `patient+professional`
+- Mensagem não vazia após trimming
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Assinatura `X-Hub-Signature-256` inválida | 403 + log de alerta de segurança; sem processar payload |
+| Maritaca indisponível | Fallback automático para Claude via `.withFallbacks()` (LangChain) |
+| Ambos LLMs indisponíveis | Mensagem padrão ao paciente + notificação ao profissional (AC 4.4) |
+| Estado Redis corrompido | Reset para `IDLE` + mensagem amigável ao paciente |
+| WhatsApp API 429 | Enfileirar mensagem para reenvio com backoff exponencial |
+
+**Target de Performance**
+- Typing indicator enviado: ≤ 1s após webhook recebido
+- Primeira resposta ao paciente: ≤ 5s
+- Detecção de intenção (LLM Maritaca Sabiá-3-small): ≤ 2s
+- Disponibilidade: 24/7 com fallback obrigatório
 
 ---
 
@@ -119,6 +227,36 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - O sistema deve prevenir condições de corrida (race conditions): tentativas simultâneas de dois pacientes pelo mesmo slot devem garantir que apenas um seja confirmado.
 - A mensagem de confirmação de agendamento deve ser entregue ao paciente em no máximo **10 segundos** após a confirmação.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `patient_id`, `professional_id`, `slot_id`, `start_at`, `end_at`, `appointment_type`, `idempotency_key`
+- Reserva: `session_id`, `TTL` (600s padrão)
+- Configurações: `min_advance_hours`, `min_advance_hours_cancellation`, `inactivity_timeout_minutes`
+
+**Regras de Validação**
+- `start_at > now()` (AC 5.7)
+- `start_at > now() + min_advance_hours` (AC 5.10)
+- Slot livre: `SET NX` Redis + `UNIQUE(professional_id, start_at)` no banco como backstop (AC 5.5)
+- Cancelamento: `start_at > now()` (AC 5.8) + antecedência mínima de cancelamento
+- `idempotency_key` único por `professional_id` (previne duplo agendamento em retry de rede)
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Slot ocupado (`SET NX` retorna nil) | `SLOT_NOT_AVAILABLE` → Motor IA oferece 3 horários alternativos próximos (AC 5.5) |
+| Agendamento no passado | Rejeição com apresentação de horários futuros disponíveis (AC 5.7) |
+| Antecedência insuficiente | Rejeição + explicação do tempo mínimo exigido |
+| Cancelamento de consulta passada | Informa impossibilidade e orienta contato direto (AC 5.8) |
+| Timeout de inatividade | TTL Redis expira → slot liberado + estado resetado para `IDLE` (AC 5.9) |
+| `UNIQUE` violation no banco (backstop) | Rollback → retornar `SLOT_NOT_AVAILABLE` |
+
+**Target de Performance**
+- Confirmação de agendamento entregue ao paciente: ≤ 10s
+- Atomicidade da reserva `SET NX` Redis: < 1ms
+- Atualização da agenda do profissional via SSE: ≤ 5s
+- `SlotCalculationService` (90 dias, 50% ocupação): ≤ 200ms
+
 ---
 
 ### Requisito 6: Confirmação Automática e Lembretes
@@ -136,6 +274,32 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - Mensagens de lembrete devem ser disparadas com tolerância máxima de **5 minutos** em relação ao horário configurado.
 - Falhas no envio de lembretes devem ser registradas em log e notificadas ao profissional, sem reenvios automáticos que possam duplicar mensagens ao paciente.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `appointment_id`, `patient_phone`, `start_at`, `status`, `last_reminded_at`
+- Configuração: `reminder_advance_hours` (24 ou 48h), `second_reminder_hours`
+- Template de mensagem aprovado pelo Meta (nome do template + idioma)
+
+**Regras de Validação**
+- Idempotência: enviar somente se `last_reminded_at IS NULL` ou fora da janela de tolerância (±10min)
+- `status IN ('pending', 'scheduled')` — não enviar para `confirmed`, `cancelled`, `completed`
+- `start_at > now()` — não enviar para consultas já passadas
+- Segundo lembrete: somente se primeiro foi enviado e paciente não respondeu no período configurável
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Falha no envio WhatsApp (4xx/5xx) | Log de erro + notificação ao profissional; sem reenvio automático (AC 6.4) |
+| Template não aprovado pelo Meta | Marcar como erro + notificar profissional para revisar template |
+| Resposta recebida mas consulta já cancelada | Ignorar resposta; sem alterar status |
+| Job BullMQ falhou | Retry 3× com backoff; se persistir → dead letter queue + alerta |
+
+**Target de Performance**
+- Tolerância máxima de disparo: ≤ 5min do horário configurado
+- Cron job: executa a cada 5min
+- Atualização de status no dashboard após resposta do paciente: ≤ 5s via SSE
+
 ---
 
 ### Requisito 7: Cadastro Automático de Pacientes
@@ -151,6 +315,31 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 #### Requisitos Não Funcionais
 - O cadastro automático deve ocorrer em segundo plano sem impactar o tempo de resposta da conversa com o paciente.
 - Dados pessoais coletados devem atender à LGPD: finalidade de coleta registrada, acesso restrito ao profissional responsável e possibilidade de exclusão mediante solicitação.
+
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `phone_number` (capturado do webhook), `professional_id`, `name` (coletado progressivamente), `date_of_birth` (coletado progressivamente), `consent_recorded_at`, `created_at`, `updated_at`
+
+**Regras de Validação**
+- `phone_number` não vazio, formato internacional (`+55...`)
+- `UNIQUE(professional_id, phone_number)` → upsert, sem duplicata (AC 7.3)
+- `name` não vazio após trimming antes de persistir
+- `date_of_birth` é data válida no passado
+- Acesso estritamente restrito ao `professional_id` responsável pelo cadastro
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Telefone com formato inválido | Log de alerta; sem criar ficha; conversa continua com fallback genérico |
+| Conflito `UNIQUE` (paciente já cadastrado) | `findExisting` — sem criar duplicata (AC 7.3) |
+| Campo nulo retornado pela IA | Ignorar campo; manter valor anterior |
+| Falha de persistência em background | Conversa continua sem interrupção; retry assíncrono |
+
+**Target de Performance**
+- `findOrCreateByPhone`: ≤ 50ms (índice UNIQUE)
+- Atualização progressiva de perfil: ≤ 100ms
+- Cadastro em background: zero impacto no tempo de resposta da conversa
 
 ---
 
@@ -170,6 +359,33 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - O acesso ao histórico de cada paciente deve ser estritamente restrito ao profissional responsável pelo cadastro.
 - O histórico deve ser imutável após registro; anotações manuais do profissional devem ser versionadas com data e hora de criação.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `interaction_record`: `patient_id`, `professional_id`, `direction` (inbound | outbound), `created_at`
+- Histórico de consultas: `appointment_id`, `start_at`, `status`
+- `manual_note`: `patient_id`, `professional_id`, `content`, `created_at` (imutável, setado pelo servidor)
+- Campos de anonimização: `name`, `phone_number`, `date_of_birth` → NULL/hash irreversível
+
+**Regras de Validação**
+- `interaction_record` e `appointment` são append-only: sem UPDATE/DELETE após criação
+- `manual_note.created_at` setado pelo servidor; `content` não vazio
+- Acesso ao histórico: `professional_id` do JWT = `professional_id` do patient (row-level security)
+- Anonimização: apenas campos de identificação pessoal; registros de atendimento retidos por ≥ 5 anos
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Tentativa de UPDATE em registro imutável | 405 Method Not Allowed |
+| Acesso a paciente de outro profissional | 403 Forbidden |
+| Falha parcial na anonimização | Rollback transacional: anonimiza tudo ou nada |
+| Paciente não encontrado | 404 com mensagem clara |
+
+**Target de Performance**
+- Carregamento do histórico (últimos 50 registros, paginado): ≤ 500ms
+- Busca de pacientes por nome/telefone: ≤ 200ms
+- Inserção de anotação manual: ≤ 200ms
+
 ---
 
 ### Requisito 9: Lista de Espera Inteligente
@@ -188,6 +404,29 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - Notificações de vaga devem ser enviadas em **ordem FIFO** (primeiro a entrar na lista, primeiro a ser notificado), garantindo equidade.
 - A notificação deve ser disparada em no máximo **30 segundos** após a liberação do horário.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `waitlist_entry`: `id`, `patient_id`, `professional_id`, `desired_date`, `desired_time_range`, `created_at`, `status` (pending | notified | accepted | expired), `notified_at`
+
+**Regras de Validação**
+- Sem entrada duplicada pendente para `patient_id + professional_id + desired_date`
+- Ordem FIFO rigorosa por `created_at`
+- AC 9.5: verificar consulta confirmada no mesmo horário antes de notificar
+- AC 9.6: `start_at_vaga > now() + min_advance_hours`; caso contrário liberar diretamente sem notificar lista
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Falha no envio WhatsApp ao paciente da lista | Retry 3×; se persistir → pular paciente, notificar próximo da fila |
+| Paciente aceitou mas slot já tomado (race condition) | Mensagem de desculpas + oferta da próxima vaga disponível |
+| Timeout sem resposta do paciente | Status `expired` + slot liberado para agendamento geral (AC 9.4) |
+| Vaga com antecedência insuficiente | Ignorar lista, liberar slot diretamente (AC 9.6) |
+
+**Target de Performance**
+- Notificação após cancelamento: ≤ 30s
+- `AppointmentCancelled` → início do processamento da fila: ≤ 5s (event-driven)
+
 ---
 
 ### Requisito 10: Social Login (OAuth2) com Google
@@ -204,6 +443,34 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 #### Requisitos Não Funcionais
 - Tokens OAuth2 devem ser armazenados de forma segura no servidor e nunca expostos ao cliente ou em logs.
 - O fluxo completo de login social deve ser concluído em no máximo **5 segundos** em condições normais de rede.
+
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `google_account_id` (sub do ID token), `name`, `email`, `profile_picture`
+- `access_token` + `refresh_token` (encriptados AES-256-GCM), `token_expires_at`
+- `oauth_state` (CSRF, Redis TTL 5min, descartado após uso)
+
+**Regras de Validação**
+- `oauth_state` CSRF válido e não expirado antes de processar callback
+- ID token verificado via JWKS do Google
+- `email_verified: true` no token
+- `google_account_id` não vinculado a outro `professional_id`
+- Tokens nunca retornados em API response nem registrados em logs
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| State CSRF inválido | 400 + log de alerta de segurança; sem criar sessão |
+| OAuth cancelado pelo usuário | Redirect para login com "Login cancelado" |
+| `email_verified: false` | Rejeitar + "Sua conta Google precisa ter e-mail verificado" |
+| API Google 5xx | Exibir erro + alternativas de login (AC 10.4) |
+| Conta Google suspensa/excluída | Notificar no próximo acesso + orientar configurar e-mail/senha (AC 10.5) |
+
+**Target de Performance**
+- Fluxo completo de login OAuth: ≤ 5s
+- Processamento do callback: ≤ 2s
+- `findOrCreate` Professional: ≤ 100ms
 
 ---
 
@@ -222,6 +489,35 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - Senhas devem ser armazenadas com hash **bcrypt** (custo mínimo 12); nenhuma senha deve ser armazenada em texto simples.
 - Após **5 tentativas de login malsucedidas** consecutivas, a conta deve ser temporariamente bloqueada por período configurável, com notificação ao profissional.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `email` (UNIQUE), `password_hash` (bcrypt custo 12), `email_verified_at`, `failed_login_attempts`, `locked_until`
+- `verification_token` (TTL 24h), `password_reset_token` (TTL 1h)
+- `totp_secret` (encriptado AES-256-GCM), `totp_enabled`, `recovery_codes` (8 hashes bcrypt, cada um de uso único)
+
+**Regras de Validação**
+- Senha: ≥ 8 caracteres, ≥ 1 letra e ≥ 1 número (AC 11.3)
+- E-mail verificado antes de permitir login
+- `locked_until IS NULL OR locked_until < now()`
+- TOTP: janela de ±1 período (30s) para tolerância de clock skew
+- Recovery code: 8 itens únicos, cada um marcado como usado após primeira validação
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Credencial inválida (< 5 tentativas) | 401 "E-mail ou senha inválidos" (sem indicar qual está errado) |
+| 5ª tentativa inválida consecutiva | Bloquear 15min + notificar profissional por e-mail |
+| E-mail não verificado | 403 + opção de reenviar e-mail de verificação |
+| TOTP inválido | 401 + conta como tentativa falha |
+| Recovery code já utilizado | 401 "Código de recuperação já utilizado" |
+| Token de redefinição expirado | 400 + link para solicitar novo |
+
+**Target de Performance**
+- `bcrypt` compare (custo 12): ~100ms (intencional — resistência a brute force)
+- Login endpoint total: ≤ 500ms
+- E-mail de verificação/reset entregue: ≤ 60s via Resend
+
 ---
 
 ### Requisito 12: Vínculo de Contas
@@ -237,6 +533,32 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 #### Requisitos Não Funcionais
 - O fluxo de vínculo deve exigir autenticação ativa simultânea em ambas as contas para prevenir sequestro de conta por terceiros.
 - A operação de vínculo deve ser registrada no log de auditoria com timestamp e IP de origem.
+
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `professional_id` (conta principal autenticada), `google_account_id` (conta a vincular)
+- Verificação de unicidade em `oauth_account`
+- `audit_log`: `actor_id`, `action='account_link'`, `ip_address`, `created_at`
+
+**Regras de Validação**
+- Ambas as contas com sessões ativas simultaneamente (AC 12.1)
+- `google_account_id` não presente em `oauth_account` com `professional_id` diferente (AC 12.4)
+- E-mails diferentes → confirmação explícita obrigatória antes de vincular (AC 12.3)
+- Operação idempotente: contas já vinculadas → 200 sem erro
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Google já vinculado a outro perfil | 409 "Esta conta Google já está em uso por outro perfil" (AC 12.4) |
+| Sessão expirada durante o fluxo | 401 + reiniciar fluxo de vínculo |
+| Confirmação recusada (e-mails diferentes) | Cancelar sem vínculo; sem alterar dados |
+| Falha no registro do AuditLog | Rollback do vínculo (auditoria é obrigatória para esta operação) |
+
+**Target de Performance**
+- Verificação de unicidade por `google_account_id`: ≤ 50ms
+- Registro no AuditLog: síncrono, ≤ 100ms
+- Fluxo completo de vínculo: ≤ 3s
 
 ---
 
@@ -257,6 +579,35 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 - Dados de cartão de crédito **nunca devem trafegar pelos servidores do Próxima Consulta**; a tokenização deve ser realizada diretamente via gateway PCI DSS certificado.
 - O timeout de processamento de uma transação deve ser de no máximo **30 segundos** antes de retornar erro ao usuário.
 
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `professional_id`, `plano` (monthly | semiannual | annual), `card_token` (gerado via Asaas.js no browser — nunca o número real)
+- `asaas_customer_id`, `asaas_subscription_id`
+- `subscription`: `status`, `current_period_end`
+- `payment`: `amount`, `method`, `status`, `asaas_payment_id` (imutável), `paid_at`
+- `idempotency_key` por tentativa de checkout
+
+**Regras de Validação**
+- Dados de cartão nunca atingem o backend — apenas `card_token` do Asaas.js (RNF)
+- Webhook Asaas: `authToken` no header com comparação constant-time (evita timing attack)
+- `asaas_payment_id` único por `payment` (idempotência de webhooks duplicados)
+- Sem assinatura ativa duplicada para o mesmo `professional_id`
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Falha no checkout | 402 com mensagem clara + opção de nova tentativa (AC 13.5) |
+| Timeout > 30s | 408 "Não foi possível processar. Tente novamente." |
+| Falha na renovação automática | Período de carência (ex: 3 dias) + notificação; após carência → `suspended` (AC 13.4) |
+| Webhook duplicado | Upsert por `asaas_payment_id` — processar uma vez, ignorar demais |
+| Webhook `authToken` inválido | 401 + log de alerta de segurança; sem processar |
+
+**Target de Performance**
+- Timeout de transação: ≤ 30s
+- Ativação do plano após confirmação: ≤ 5s
+- Processamento de webhook Asaas: 200 imediato + processamento assíncrono via BullMQ
+
 ---
 
 ### Requisito 14: Painel de Faturamento
@@ -270,6 +621,33 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 
 #### Requisitos Não Funcionais
 - O histórico de cobranças deve ser **imutável e auditável**; nenhum registro financeiro pode ser alterado ou excluído retroativamente.
+
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `subscription`: `plan`, `status`, `current_period_end`
+- `payment` history: `amount`, `method`, `status`, `paid_at`, `asaas_payment_id` (append-only)
+- Método de pagamento mascarado: últimos 4 dígitos ou tipo PIX (sem dados sensíveis)
+- `asaas_customer_id` para operações via Asaas API
+
+**Regras de Validação**
+- Tabela `payment` é append-only: sem UPDATE/DELETE (RNF)
+- Cancelamento permitido somente com `subscription.status = 'active'`
+- Alteração de método: novo `card_token` válido via Asaas.js antes de atualizar
+- Acesso restrito ao `professional_id` autenticado
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Falha ao buscar histórico da Asaas API | Exibir dados locais do banco como fallback |
+| Cancelamento falhou na API Asaas | Manter status atual + retornar erro ao usuário |
+| Alteração de método de pagamento falhou | Manter método anterior + notificar usuário |
+| Tentativa de modificar registro histórico | 405 Method Not Allowed |
+
+**Target de Performance**
+- Carregamento do painel: ≤ 2s
+- Histórico de cobranças (query paginada): ≤ 300ms
+- Operações de cancelamento/alteração (inclui chamada Asaas): ≤ 5s
 
 ---
 
@@ -287,3 +665,29 @@ Todas as ações críticas (agendamentos, cancelamentos, pagamentos, alteraçõe
 #### Requisitos Não Funcionais
 - O sistema deve impedir múltiplos trials para o mesmo profissional, verificando duplicidade por e-mail e por número de telefone vinculado.
 - A expiração do trial é processada por um job agendado periódico (ex: a cada hora); portanto, o bloqueio de acesso pode ocorrer com até **1 hora de atraso** em relação ao momento exato de vencimento. Essa tolerância é aceitável dado que a duração do trial é de 7 dias.
+
+#### Detalhamento para Implementação
+
+**Dados Necessários**
+- `professional_id`, `email`, `phone_number` (para deduplicação)
+- `subscription`: `status='trial'`, `trial_starts_at`, `trial_ends_at` (= starts_at + 7 dias)
+- `notification_2d_sent` (boolean, controle de notificação de 2 dias)
+
+**Regras de Validação**
+- Deduplicação por `email` AND por `phone_number` antes de ativar (RNF)
+- Sem exigência de dados de cartão (AC 15.2)
+- 1 trial por profissional — sem reativação após uso
+- `checkAccess()`: `trial_ends_at ≥ now() AND status = 'trial'` → libera; caso contrário → bloqueia
+
+**Resolução de Erros**
+| Situação | Resposta |
+|---|---|
+| Segundo trial detectado (mesmo e-mail ou telefone) | 409 "Você já utilizou o período de teste. Selecione um plano para continuar." |
+| `TrialExpirationJob` falhou | Retry no próximo ciclo do cron (tolerância ≤ 1h, explícita no RNF) |
+| Notificação de 2 dias falhou (Resend) | Retry 3×; se persistir → log + trial continua normalmente |
+| Acesso negado pós-trial | Redirect para `/planos` com banner "Seu período de teste expirou" |
+
+**Target de Performance**
+- Ativação do trial após registro: ≤ 500ms (síncrona)
+- `checkAccess()`: ≤ 50ms (índice em `subscription.professional_id`)
+- Expiração: job a cada hora; atraso máximo aceitável de 1h (RNF explícito)
