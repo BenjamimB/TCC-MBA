@@ -1,22 +1,33 @@
 # Plano de Implementação — Próxima Consulta
 
-## 1. Fundação — Infraestrutura, esquema e estrutura base
+## Versões
 
-- [ ] 1.1 Configurar Railway, ambientes e pipeline CI/CD com GitHub Actions
+| Versão | Escopo | Status |
+|--------|--------|--------|
+| **V1 — Protótipo** | Tasks 1, 2.1, 3, 4.1, 6, 7, 10.1–10.3 | **Implementar agora** |
+| **V2 — Produto completo** | Tasks 2.2–2.4, 4.2–4.3, 5, 8, 9, 10.4–10.5, 11, 12 | Não executar até ser explicitamente solicitado |
+
+> **Apenas a V1 será implementada nesta fase.** Tasks e subtasks marcadas com `[V2]` não devem ser executadas até solicitação explícita.
+
+---
+
+## 1. `[V1]` Fundação — Infraestrutura, esquema e estrutura base
+
+- [ ] 1.1 `[V1]` Configurar Railway, ambientes e pipeline CI/CD com GitHub Actions
   - Criar projeto Railway com três serviços: backend NestJS, plugin PostgreSQL 16 e plugin Redis
   - Configurar dois ambientes: staging (branch `develop`) e production (branch `main`)
   - Pipeline GitHub Actions: install → lint → unit tests → integration tests → deploy ao ambiente correspondente via `RAILWAY_TOKEN`
   - Health check em `GET /health` verificando conectividade com PostgreSQL e Redis
   - _Requirements: RNF-01_
 
-- [ ] 1.2 Criar esquema completo do banco com migrations Prisma
+- [ ] 1.2 `[V1]` Criar esquema completo do banco com migrations Prisma
   - Criar todas as tabelas do modelo físico: professional, oauth_account, availability, calendar_sync, patient, appointment, waitlist_entry, conversation, message, interaction_record, subscription, payment, audit_log
   - Aplicar constraints e índices críticos: `UNIQUE(professional_id, start_at)` em appointment, `UNIQUE(professional_id, phone_number)` em patient, índices de busca por data e paciente
   - Configurar encryption at rest habilitada no plugin PostgreSQL Railway (padrão)
   - Incluir `prisma migrate deploy` como etapa do deploy no pipeline
   - _Requirements: RNF-02_
 
-- [ ] 1.3 Scaffoldar NestJS com módulos de domínio e adaptadores de porta
+- [ ] 1.3 `[V1]` Scaffoldar NestJS com módulos de domínio e adaptadores de porta
   - Criar os seis módulos de domínio com limites explícitos: Schedule, Conversation, Booking, Patient, Auth, Billing
   - Criar módulo de infraestrutura com interfaces de porta: WhatsAppGateway, AIGateway, CalendarGateway, PaymentGateway, AuditLogService, SSE EventBus
   - Configurar Prisma 5 como ORM e BullMQ com conexão Redis como motor de filas
@@ -25,9 +36,9 @@
 
 ---
 
-## 2. (P) Autenticação — registro, login, 2FA e OAuth
+## 2. Autenticação — registro, login, 2FA e OAuth
 
-- [ ] 2.1 Implementar registro, login por e-mail/senha e recuperação de acesso
+- [ ] 2.1 `[V1]` Implementar registro, login por e-mail/senha e recuperação de acesso
   - Registro com validação de senha (mín. 8 chars, letras e números) e hash bcrypt custo 12
   - E-mail de verificação via Resend com token one-time; link de recuperação de senha válido por 1h
   - Login retorna JWT RS256 (access 15min) + refresh token opaque (7d) em cookie HttpOnly Secure SameSite=Strict
@@ -35,21 +46,21 @@
   - Rate limiting de 5 tentativas/conta no endpoint de login
   - _Requirements: 11.1, 11.3, 11.4, 11.5_
 
-- [ ] 2.2 (P) Implementar 2FA com TOTP e recovery codes
+- [ ] 2.2 `[V2]` Implementar 2FA com TOTP e recovery codes
   - Setup TOTP: gera secret, retorna QR code URL e 8 recovery codes hashed
   - Ativação exige confirmação com código TOTP válido antes de persistir
   - Validação do código TOTP a cada login subsequente quando 2FA ativo
   - Recovery code de uso único: marcado como usado após primeira validação bem-sucedida
   - _Requirements: 11.2, 11.5_
 
-- [ ] 2.3 (P) Implementar Social Login com Google OAuth2
+- [ ] 2.3 `[V2]` Implementar Social Login com Google OAuth2
   - Endpoint que gera URL de autorização Google com state CSRF
   - Callback processa code de autorização, importa nome/e-mail/foto e cria ou encontra Professional
   - Tokens OAuth2 armazenados encriptados AES-256-GCM em oauth_account; nunca expostos em resposta ou logs
   - Se conta Google vinculada for suspensa, notifica profissional no próximo acesso e orienta configurar e-mail/senha
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
 
-- [ ] 2.4 Implementar vínculo de contas e ciclo completo de tokens
+- [ ] 2.4 `[V2]` Implementar vínculo de contas e ciclo completo de tokens
   - Vincula conta Google a perfil e-mail/senha existente: exige autenticação ativa simultânea em ambas
   - Rejeita vínculo se google_account_id já pertence a outro professional_id
   - Endpoint de refresh de tokens e logout com invalidação do refresh token no banco
@@ -58,15 +69,15 @@
 
 ---
 
-## 3. (P) Módulo de agenda — disponibilidade e cálculo de slots
+## 3. `[V1]` (P) Módulo de agenda — disponibilidade e cálculo de slots
 
-- [ ] 3.1 Implementar gerenciamento de disponibilidade semanal
+- [ ] 3.1 `[V1]` Implementar gerenciamento de disponibilidade semanal
   - CRUD de templates por dia da semana com validação: end_time > start_time, slot_duration_minutes ≥ 15, unicidade por professional_id+day_of_week
   - Ao salvar nova configuração, publica evento `AvailabilityUpdated` para invalidar cache de slots do ConversationOrchestrator
   - AC 1.6: slot já oferecido em fluxo de agendamento ativo é preservado até o TTL da reserva expirar antes de aplicar nova config
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-- [ ] 3.2 (P) Implementar cálculo de slots livres
+- [ ] 3.2 `[V1]` (P) Implementar cálculo de slots livres
   - Calcula slots subtraindo agendamentos existentes e bloqueios de calendário externo da disponibilidade configurada
   - Formato de slotId: `{professionalId}:{ISO-date}:{HHmm}`; retorna isReserved refletindo locks Redis ativos
   - Exclui slots anteriores a `now() + minAdvanceHours` conforme antecedência mínima configurável
@@ -74,38 +85,38 @@
 
 ---
 
-## 4. (P) Módulo de pacientes — CRM e LGPD
+## 4. Módulo de pacientes — CRM e LGPD
 
-- [ ] 4.1 Implementar cadastro automático e perfil de pacientes
+- [ ] 4.1 `[V1]` Implementar cadastro automático e perfil de pacientes
   - `findOrCreateByPhone`: idempotente com UNIQUE(professional_id, phone_number); registra `consent_recorded_at` no primeiro contato
   - Atualização progressiva de perfil durante conversa WhatsApp (nome, data de nascimento)
   - API REST para o profissional visualizar e editar fichas de pacientes pelo painel web
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
 
-- [ ] 4.2 (P) Implementar histórico de atendimento e anotações manuais
+- [ ] 4.2 `[V2]` Implementar histórico de atendimento e anotações manuais
   - Registra todas as interações WhatsApp com data/hora em interaction_record; append-only após criação
   - Registra consultas realizadas com status (compareceu, faltou, cancelou, cancelado)
   - Anotações manuais do profissional com timestamp imutável; histórico ordenado cronologicamente
   - Acesso ao histórico restrito ao professional_id responsável pelo cadastro
   - _Requirements: 8.1, 8.2, 8.3, 8.4_
 
-- [ ] 4.3 Implementar anonimização LGPD (direito ao esquecimento)
+- [ ] 4.3 `[V2]` Implementar anonimização LGPD (direito ao esquecimento)
   - `anonymize()` substitui name, phone_number e date_of_birth por nulos/hash irreversível
   - Mantém registros de agendamento e histórico de saúde por no mínimo 5 anos (retenção legal)
   - _Requirements: 8.5, RNF-02_
 
 ---
 
-## 5. (P) Faturamento — trial, assinaturas e pagamento
+## 5. `[V2]` Faturamento — trial, assinaturas e pagamento
 
-- [ ] 5.1 Implementar free trial e controle de acesso por assinatura
+- [ ] 5.1 `[V2]` Implementar free trial e controle de acesso por assinatura
   - `startTrial()`: ativa 7 dias de acesso completo sem exigir cartão; verifica duplicidade por e-mail e telefone vinculado
   - `checkAccess()`: bloqueia funcionalidades quando trial expirado e sem assinatura ativa; direciona para tela de planos
   - Notificação por e-mail quando faltam 2 dias para expirar o trial
   - TrialExpirationJob: BullMQ cron a cada hora; atualiza status para `suspended` nos trials vencidos
   - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5_
 
-- [ ] 5.2 (P) Implementar checkout e processamento de pagamento via Asaas
+- [ ] 5.2 `[V2]` Implementar checkout e processamento de pagamento via Asaas
   - Criação de assinatura recorrente no Asaas com opções PIX, cartão (tokenizado via Asaas.js no frontend) e boleto
   - Ativa plano imediatamente após confirmação de pagamento; envia e-mail de confirmação
   - Período de carência em falha de renovação automática; suspende acesso após carência esgotada
@@ -113,36 +124,36 @@
   - Webhook Asaas: valida `authToken` no header; processa `PAYMENT_CONFIRMED`, `PAYMENT_OVERDUE`, `SUBSCRIPTION_CANCELLED`
   - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7_
 
-- [ ] 5.3 Implementar painel de faturamento backend
+- [ ] 5.3 `[V2]` Implementar painel de faturamento backend
   - API que retorna plano atual, data de renovação e histórico imutável de cobranças
   - Fluxo de alteração de método de pagamento e cancelamento de assinatura com acesso até fim do ciclo
   - _Requirements: 14.1, 14.2, 14.3_
 
 ---
 
-## 6. Motor de IA — LangChain, Maritaca e state machine da conversa
+## 6. `[V1]` Motor de IA — LangChain, Maritaca e state machine da conversa
 
-- [ ] 6.1 (P) Configurar LangChain.js com Maritaca e Claude como fallback
+- [ ] 6.1 `[V1]` (P) Configurar LangChain.js com Maritaca e Claude como fallback
   - Instalar `@langchain/community` e `@langchain/anthropic`; configurar `ChatOpenAI` com `baseURL: https://chat.maritaca.ai/api` para Maritaca
   - AIGateway com `AIProvider` discriminador: `maritaca-small` e `maritaca` via ChatOpenAI; `claude-haiku` e `claude-sonnet` via `@langchain/anthropic`
   - Fallback via `.withFallbacks()`: detecção de intenção usa Sabiá-3-small → Haiku; geração/tool calling usa Sabiá-3 → Sonnet
   - Circuit breaker nos gateways: após 5 falhas consecutivas em 60s, abre por 30s
   - _Requirements: 4.1, 4.5_
 
-- [ ] 6.2 (P) Implementar WhatsApp Gateway e webhook handler
+- [ ] 6.2 `[V1]` (P) Implementar WhatsApp Gateway e webhook handler
   - WhatsAppGateway: `sendTextMessage`, `sendTemplate`, `validateWebhookSignature` (HMAC-SHA256 via `X-Hub-Signature-256`), `parseWebhookPayload`
   - Endpoint webhook POST: valida assinatura obrigatoriamente antes de qualquer processamento; enfileira mensagem no BullMQ
   - Retorna 200 imediatamente ao Meta; processamento assíncrono pelo ConversationOrchestrator
   - Envia typing indicator imediatamente após receber mensagem para cumprir latência ≤5s
   - _Requirements: 4.1, 4.4_
 
-- [ ] 6.3 Implementar AITriageService — detecção de intenção e geração de resposta
+- [ ] 6.3 `[V1]` Implementar AITriageService — detecção de intenção e geração de resposta
   - `detectIntent()`: LCEL chain com Maritaca Sabiá-3-small; retorna `{intent, confidence}`; intent=`unclear` quando confiança insuficiente
   - `generateResponse()`: Maritaca Sabiá-3 com contexto da conversa como JSON estruturado (nunca histórico completo); resposta em PT-BR cordial e profissional
   - `executeWithTools()`: suporta tool calling para fluxos que exigem dados externos (ex: listar slots)
   - _Requirements: 4.1, 4.2, 4.3, 4.5_
 
-- [ ] 6.4 Implementar ConversationOrchestrator com state machine
+- [ ] 6.4 `[V1]` Implementar ConversationOrchestrator com state machine
   - Persiste estado da conversa no Redis (`HSET conv:{patientPhone}:{professionalId}`; TTL 1800s por inatividade)
   - Executa state machine determinística: IDLE → TRIAGING → BOOKING_COLLECTING → BOOKING_CONFIRMING → CONCLUDED (e demais transições do diagrama)
   - Lock por chave de conversa garante processamento sequencial de mensagens do mesmo paciente
@@ -154,23 +165,23 @@
 
 ---
 
-## 7. Agendamento, reserva de slots e lista de espera
+## 7. `[V1]` Agendamento, reserva de slots e lista de espera
 
-- [ ] 7.1 Implementar BookingService com regras de negócio de agendamento
+- [ ] 7.1 `[V1]` Implementar BookingService com regras de negócio de agendamento
   - `createAppointment()`: valida que slot não está no passado, respeita antecedência mínima e usa idempotencyKey para reprocessamento seguro
   - `cancelAppointment()`: valida que consulta é futura e respeita antecedência mínima de cancelamento
   - `rescheduleAppointment()`: cancela consulta existente e cria nova no slot selecionado
   - Ao criar/cancelar/confirmar/reagendar, publica eventos correspondentes para CalendarSyncService, WaitlistService e SSE EventBus
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.6, 5.7, 5.8, 5.10_
 
-- [ ] 7.2 (P) Implementar SlotReservationService com lock atômico Redis
+- [ ] 7.2 `[V1]` (P) Implementar SlotReservationService com lock atômico Redis
   - `reserve()`: executa `SET slot:{slotId} {sessionId} NX EX {ttl=600s}`; retorna `SLOT_NOT_AVAILABLE` se já ocupado por outra sessão
   - `release()`: Lua script atômico que verifica ownership antes de deletar (previne liberação por terceiros)
   - `extend()`: renova TTL somente se sessionId corresponde ao owner atual
   - Garante que exatamente uma entre N requisições concorrentes pelo mesmo slot recebe confirmação
   - _Requirements: 5.1, 5.5_
 
-- [ ] 7.3 Implementar WaitlistService com notificação FIFO
+- [ ] 7.3 `[V1]` Implementar WaitlistService com notificação FIFO
   - Adiciona paciente à lista quando nenhum slot disponível para a data desejada
   - Ao receber `AppointmentCancelled`: notifica próximo da fila FIFO via WhatsApp em ≤30s
   - Pula paciente com consulta confirmada no mesmo horário da vaga liberada
@@ -180,16 +191,16 @@
 
 ---
 
-## 8. Lembretes automáticos e confirmação de presença
+## 8. `[V2]` Lembretes automáticos e confirmação de presença
 
-- [ ] 8.1 Implementar ReminderJob — disparo de lembretes agendados
+- [ ] 8.1 `[V2]` Implementar ReminderJob — disparo de lembretes agendados
   - BullMQ cron a cada hora; consulta appointments com `start_at` no intervalo de antecedência configurado sem `last_reminded_at`
   - Envia lembrete via WhatsApp com template pré-aprovado; marca `last_reminded_at` para garantir idempotência em re-execuções
   - Profissional configura antecedência dos lembretes por conta (24h ou 48h antes da consulta)
   - Falha no envio registrada em log e notificada ao profissional sem disparar reenvio automático
   - _Requirements: 6.1, 6.4, 6.5_
 
-- [ ] 8.2 Implementar processamento de respostas ao lembrete
+- [ ] 8.2 `[V2]` Implementar processamento de respostas ao lembrete
   - Resposta "Sim" ao lembrete: atualiza status da consulta para `confirmed` no dashboard em tempo real
   - Resposta "Não": inicia automaticamente o fluxo de reagendamento ou cancelamento via ConversationOrchestrator
   - Se paciente não responder dentro do período configurável: envia segundo lembrete de follow-up (sem duplicação se já respondeu)
@@ -197,9 +208,9 @@
 
 ---
 
-## 9. Sincronização de calendário externo
+## 9. `[V2]` Sincronização de calendário externo
 
-- [ ] 9.1 Implementar CalendarGateway e CalendarSyncService
+- [ ] 9.1 `[V2]` Implementar CalendarGateway e CalendarSyncService
   - CalendarGateway: `listEvents`, `createEvent`, `deleteEvent` para Google Calendar API v3 e Microsoft Graph v1.0
   - `connectCalendar()`: OAuth2 flow para Google/Outlook; armazena access_token + refresh_token encriptados
   - `syncExternalEvents()`: importa eventos existentes e bloqueia slots correspondentes na agenda do sistema
@@ -215,14 +226,14 @@
 
 ## 10. Frontend — Painel web Next.js 14
 
-- [ ] 10.1 Implementar fluxo de autenticação no frontend
+- [ ] 10.1 `[V1]` Implementar fluxo de autenticação no frontend
   - Telas de registro, login (e-mail/senha e Google OAuth), verificação de e-mail e recuperação de senha
   - Configuração de 2FA: exibição de QR code, confirmação de código TOTP e exibição de recovery codes
   - Gestão de sessão com refresh automático de JWT via cookie HttpOnly; redirect para login em token expirado
   - Tela de vínculo de contas Google a perfil existente
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 11.1, 11.2, 11.3, 11.4, 11.5, 12.1, 12.2, 12.3, 12.4_
 
-- [ ] 10.2 (P) Implementar dashboard de agenda com atualizações em tempo real
+- [ ] 10.2 `[V1]` (P) Implementar dashboard de agenda com atualizações em tempo real
   - Visualização diária e semanal com todos os agendamentos e status (confirmado, pendente, cancelado, no-show)
   - Indicadores visuais de ocupação por slot; carregamento inicial ≤2s em conexão padrão
   - SSE via Route Handler: recebe eventos do EventBus e atualiza UI em ≤5s sem reload de página
@@ -230,18 +241,18 @@
   - Layout responsivo funcional em smartphones e tablets sem aplicativo nativo
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, RNF-04_
 
-- [ ] 10.3 (P) Implementar tela de configuração de disponibilidade
+- [ ] 10.3 `[V1]` (P) Implementar tela de configuração de disponibilidade
   - Configuração por dia da semana: ativar/desativar, horário de início/fim, duração de slot e intervalo entre consultas
   - Validação client-side e server-side; alterações propagadas ao Motor de IA em ≤5s após salvar
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
 
-- [ ] 10.4 (P) Implementar CRM de pacientes no painel
+- [ ] 10.4 `[V2]` Implementar CRM de pacientes no painel
   - Lista de pacientes com busca por nome/telefone; ficha completa com histórico cronológico de atendimentos
   - Adição de anotações manuais; edição de perfil pelo profissional
   - Solicitação de exclusão de dados LGPD: aciona fluxo de anonimização e confirma ao profissional
   - _Requirements: 7.4, 8.3, 8.4, 8.5_
 
-- [ ] 10.5 (P) Implementar checkout e painel de faturamento no frontend
+- [ ] 10.5 `[V2]` Implementar checkout e painel de faturamento no frontend
   - Seleção de plano (Mensal/Semestral/Anual); tokenização de cartão via Asaas.js no browser (dados de cartão nunca atingem o backend)
   - Exibição de QR code PIX e instruções de pagamento quando método PIX selecionado
   - Painel de faturamento: plano atual, data de renovação, histórico imutável de cobranças
