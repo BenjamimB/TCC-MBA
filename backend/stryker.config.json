@@ -1,0 +1,12 @@
+{
+  "testRunner": "jest",
+  "reporters": ["json", "clear-text"],
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/health/health.service.ts",
+    "src/shared/result.ts"
+  ],
+  "jest": {
+    "configFile": "package.json"
+  }
+}

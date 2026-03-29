@@ -1,0 +1,23 @@
+-------------------------|---------|----------|---------|---------|-------------------
+File                     | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------------|---------|----------|---------|---------|-------------------
+All files                |       0 |        0 |       0 |       0 |                   
+ src                     |       0 |        0 |       0 |       0 |                   
+  app.controller.ts      |       0 |        0 |       0 |       0 | 1-10              
+  app.module.ts          |       0 |      100 |     100 |       0 | 1-11              
+  app.service.ts         |       0 |      100 |       0 |       0 | 1-6               
+  main.ts                |       0 |        0 |       0 |       0 | 1-8               
+ src/health              |       0 |        0 |       0 |       0 |                   
+  health.controller.ts   |       0 |        0 |       0 |       0 | 1-13              
+  health.module.ts       |       0 |      100 |       0 |       0 | 1-20              
+  health.service.ts      |       0 |        0 |       0 |       0 | 15-29             
+ src/health/probes       |       0 |      100 |       0 |       0 |                   
+  prisma-health.probe.ts |       0 |      100 |       0 |       0 | 1-5               
+  redis-health.probe.ts  |       0 |      100 |       0 |       0 | 1-5               
+-------------------------|---------|----------|---------|---------|-------------------
+Test Suites: 1 passed, 1 total
+Tests:       8 passed, 8 total
+Snapshots:   0 total
+Time:        3.24 s
+Ran all test suites matching schema.spec.ts.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?

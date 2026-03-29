@@ -1,0 +1,46 @@
+---------------------------|---------|----------|---------|---------|-------------------
+File                       | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+---------------------------|---------|----------|---------|---------|-------------------
+All files                  |   78.89 |       45 |   38.88 |   73.41 |                   
+ src                       |   78.12 |       50 |      25 |   73.07 |                   
+  app.controller.ts        |    87.5 |       75 |      50 |   83.33 | 10                
+  app.module.ts            |     100 |      100 |     100 |     100 |                   
+  app.service.ts           |      80 |      100 |       0 |   66.66 | 6                 
+  main.ts                  |       0 |        0 |       0 |       0 | 1-8               
+ src/auth                  |     100 |      100 |     100 |     100 |                   
+  auth.module.ts           |     100 |      100 |     100 |     100 |                   
+ src/billing               |     100 |      100 |     100 |     100 |                   
+  billing.module.ts        |     100 |      100 |     100 |     100 |                   
+ src/booking               |     100 |      100 |     100 |     100 |                   
+  booking.module.ts        |     100 |      100 |     100 |     100 |                   
+ src/conversation          |     100 |      100 |     100 |     100 |                   
+  conversation.module.ts   |     100 |      100 |     100 |     100 |                   
+ src/health                |   65.51 |    42.85 |   33.33 |   65.21 |                   
+  health.controller.ts     |      70 |       60 |      50 |    62.5 | 11-13             
+  health.module.ts         |     100 |      100 |     100 |     100 |                   
+  health.service.ts        |      30 |        0 |   16.66 |    37.5 | 22-29             
+ src/health/probes         |     100 |      100 |       0 |     100 |                   
+  prisma-health.probe.ts   |     100 |      100 |       0 |     100 |                   
+  redis-health.probe.ts    |     100 |      100 |       0 |     100 |                   
+ src/infra                 |     100 |      100 |     100 |     100 |                   
+  infra.module.ts          |     100 |      100 |     100 |     100 |                   
+ src/infra/ports           |       0 |      100 |     100 |       0 |                   
+  ai-gateway.port.ts       |       0 |      100 |     100 |       0 | 29                
+  audit-log.port.ts        |       0 |      100 |     100 |       0 | 16                
+  calendar-gateway.port.ts |       0 |      100 |     100 |       0 | 29                
+  payment-gateway.port.ts  |       0 |      100 |     100 |       0 | 19                
+  sse-event-bus.port.ts    |       0 |      100 |     100 |       0 | 12                
+  whatsapp-gateway.port.ts |       0 |      100 |     100 |       0 | 21                
+ src/patient               |     100 |      100 |     100 |     100 |                   
+  patient.module.ts        |     100 |      100 |     100 |     100 |                   
+ src/schedule              |     100 |      100 |     100 |     100 |                   
+  schedule.module.ts       |     100 |      100 |     100 |     100 |                   
+ src/shared                |     100 |      100 |     100 |     100 |                   
+  result.ts                |     100 |      100 |     100 |     100 |                   
+---------------------------|---------|----------|---------|---------|-------------------
+Test Suites: 1 passed, 1 total
+Tests:       7 passed, 7 total
+Snapshots:   0 total
+Time:        2.052 s
+Ran all test suites matching result.spec.ts.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?

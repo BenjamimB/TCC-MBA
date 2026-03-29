@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    name: Build, Lint & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: proxima
+          POSTGRES_PASSWORD: proxima
+          POSTGRES_DB: proxima_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:ci
+        env:
+          DATABASE_URL: postgresql://proxima:proxima@localhost:5432/proxima_test
+          REDIS_URL: redis://localhost:6379
+
+      - name: Run migrations (integration)
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://proxima:proxima@localhost:5432/proxima_test
+
+      - name: Integration tests
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: postgresql://proxima:proxima@localhost:5432/proxima_test
+          REDIS_URL: redis://localhost:6379
+
+  deploy-staging:
+    name: Deploy → Staging
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway (Staging)
+        uses: railwayapp/railway-github-action@v1
+        with:
+          railway-token: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+          service: backend
+
+  deploy-production:
+    name: Deploy → Production
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway (Production)
+        uses: railwayapp/railway-github-action@v1
+        with:
+          railway-token: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+          service: backend

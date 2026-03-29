@@ -13,21 +13,21 @@
 
 ## 1. `[V1]` Fundação — Infraestrutura, esquema e estrutura base
 
-- [ ] 1.1 `[V1]` Configurar Railway, ambientes e pipeline CI/CD com GitHub Actions
+- [x] 1.1 `[V1]` Configurar Railway, ambientes e pipeline CI/CD com GitHub Actions
   - Criar projeto Railway com três serviços: backend NestJS, plugin PostgreSQL 16 e plugin Redis
   - Configurar dois ambientes: staging (branch `develop`) e production (branch `main`)
   - Pipeline GitHub Actions: install → lint → unit tests → integration tests → deploy ao ambiente correspondente via `RAILWAY_TOKEN`
   - Health check em `GET /health` verificando conectividade com PostgreSQL e Redis
   - _Requirements: RNF-01_
 
-- [ ] 1.2 `[V1]` Criar esquema completo do banco com migrations Prisma
+- [x] 1.2 `[V1]` Criar esquema completo do banco com migrations Prisma
   - Criar todas as tabelas do modelo físico: professional, oauth_account, availability, calendar_sync, patient, appointment, waitlist_entry, conversation, message, interaction_record, subscription, payment, audit_log
   - Aplicar constraints e índices críticos: `UNIQUE(professional_id, start_at)` em appointment, `UNIQUE(professional_id, phone_number)` em patient, índices de busca por data e paciente
   - Configurar encryption at rest habilitada no plugin PostgreSQL Railway (padrão)
   - Incluir `prisma migrate deploy` como etapa do deploy no pipeline
   - _Requirements: RNF-02_
 
-- [ ] 1.3 `[V1]` Scaffoldar NestJS com módulos de domínio e adaptadores de porta
+- [x] 1.3 `[V1]` Scaffoldar NestJS com módulos de domínio e adaptadores de porta
   - Criar os seis módulos de domínio com limites explícitos: Schedule, Conversation, Booking, Patient, Auth, Billing
   - Criar módulo de infraestrutura com interfaces de porta: WhatsAppGateway, AIGateway, CalendarGateway, PaymentGateway, AuditLogService, SSE EventBus
   - Configurar Prisma 5 como ORM e BullMQ com conexão Redis como motor de filas
