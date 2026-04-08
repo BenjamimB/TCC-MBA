@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { RedisProbe } from '../health.service';
+import { RedisService } from '../../infra/redis.service';
 
 @Injectable()
 export class RedisHealthProbe implements RedisProbe {
+  constructor(private readonly redis: RedisService) {}
+
   async ping(): Promise<void> {
-    // Placeholder — will be replaced when Redis/BullMQ is configured in task 1.3
-    // In production: await this.redis.ping()
+    await this.redis.client.ping();
   }
 }

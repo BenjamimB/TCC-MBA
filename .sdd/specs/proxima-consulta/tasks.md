@@ -38,7 +38,7 @@
 
 ## 2. Autenticação — registro, login, 2FA e OAuth
 
-- [ ] 2.1 `[V1]` Implementar registro, login por e-mail/senha e recuperação de acesso
+- [x] 2.1 `[V1]` Implementar registro, login por e-mail/senha e recuperação de acesso
   - Registro com validação de senha (mín. 8 chars, letras e números) e hash bcrypt custo 12
   - E-mail de verificação via Resend com token one-time; link de recuperação de senha válido por 1h
   - Login retorna JWT RS256 (access 15min) + refresh token opaque (7d) em cookie HttpOnly Secure SameSite=Strict
@@ -71,13 +71,13 @@
 
 ## 3. `[V1]` (P) Módulo de agenda — disponibilidade e cálculo de slots
 
-- [ ] 3.1 `[V1]` Implementar gerenciamento de disponibilidade semanal
+- [x] 3.1 `[V1]` Implementar gerenciamento de disponibilidade semanal
   - CRUD de templates por dia da semana com validação: end_time > start_time, slot_duration_minutes ≥ 15, unicidade por professional_id+day_of_week
   - Ao salvar nova configuração, publica evento `AvailabilityUpdated` para invalidar cache de slots do ConversationOrchestrator
   - AC 1.6: slot já oferecido em fluxo de agendamento ativo é preservado até o TTL da reserva expirar antes de aplicar nova config
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-- [ ] 3.2 `[V1]` (P) Implementar cálculo de slots livres
+- [x] 3.2 `[V1]` (P) Implementar cálculo de slots livres
   - Calcula slots subtraindo agendamentos existentes e bloqueios de calendário externo da disponibilidade configurada
   - Formato de slotId: `{professionalId}:{ISO-date}:{HHmm}`; retorna isReserved refletindo locks Redis ativos
   - Exclui slots anteriores a `now() + minAdvanceHours` conforme antecedência mínima configurável
@@ -87,7 +87,7 @@
 
 ## 4. Módulo de pacientes — CRM e LGPD
 
-- [ ] 4.1 `[V1]` Implementar cadastro automático e perfil de pacientes
+- [x] 4.1 `[V1]` Implementar cadastro automático e perfil de pacientes
   - `findOrCreateByPhone`: idempotente com UNIQUE(professional_id, phone_number); registra `consent_recorded_at` no primeiro contato
   - Atualização progressiva de perfil durante conversa WhatsApp (nome, data de nascimento)
   - API REST para o profissional visualizar e editar fichas de pacientes pelo painel web
@@ -133,27 +133,27 @@
 
 ## 6. `[V1]` Motor de IA — LangChain, Maritaca e state machine da conversa
 
-- [ ] 6.1 `[V1]` (P) Configurar LangChain.js com Maritaca e Claude como fallback
+- [x] 6.1 `[V1]` (P) Configurar LangChain.js com Maritaca e Claude como fallback
   - Instalar `@langchain/community` e `@langchain/anthropic`; configurar `ChatOpenAI` com `baseURL: https://chat.maritaca.ai/api` para Maritaca
   - AIGateway com `AIProvider` discriminador: `maritaca-small` e `maritaca` via ChatOpenAI; `claude-haiku` e `claude-sonnet` via `@langchain/anthropic`
   - Fallback via `.withFallbacks()`: detecção de intenção usa Sabiá-3-small → Haiku; geração/tool calling usa Sabiá-3 → Sonnet
   - Circuit breaker nos gateways: após 5 falhas consecutivas em 60s, abre por 30s
   - _Requirements: 4.1, 4.5_
 
-- [ ] 6.2 `[V1]` (P) Implementar WhatsApp Gateway e webhook handler
+- [x] 6.2 `[V1]` (P) Implementar WhatsApp Gateway e webhook handler
   - WhatsAppGateway: `sendTextMessage`, `sendTemplate`, `validateWebhookSignature` (HMAC-SHA256 via `X-Hub-Signature-256`), `parseWebhookPayload`
   - Endpoint webhook POST: valida assinatura obrigatoriamente antes de qualquer processamento; enfileira mensagem no BullMQ
   - Retorna 200 imediatamente ao Meta; processamento assíncrono pelo ConversationOrchestrator
   - Envia typing indicator imediatamente após receber mensagem para cumprir latência ≤5s
   - _Requirements: 4.1, 4.4_
 
-- [ ] 6.3 `[V1]` Implementar AITriageService — detecção de intenção e geração de resposta
+- [x] 6.3 `[V1]` Implementar AITriageService — detecção de intenção e geração de resposta
   - `detectIntent()`: LCEL chain com Maritaca Sabiá-3-small; retorna `{intent, confidence}`; intent=`unclear` quando confiança insuficiente
   - `generateResponse()`: Maritaca Sabiá-3 com contexto da conversa como JSON estruturado (nunca histórico completo); resposta em PT-BR cordial e profissional
   - `executeWithTools()`: suporta tool calling para fluxos que exigem dados externos (ex: listar slots)
   - _Requirements: 4.1, 4.2, 4.3, 4.5_
 
-- [ ] 6.4 `[V1]` Implementar ConversationOrchestrator com state machine
+- [x] 6.4 `[V1]` Implementar ConversationOrchestrator com state machine
   - Persiste estado da conversa no Redis (`HSET conv:{patientPhone}:{professionalId}`; TTL 1800s por inatividade)
   - Executa state machine determinística: IDLE → TRIAGING → BOOKING_COLLECTING → BOOKING_CONFIRMING → CONCLUDED (e demais transições do diagrama)
   - Lock por chave de conversa garante processamento sequencial de mensagens do mesmo paciente
@@ -167,21 +167,21 @@
 
 ## 7. `[V1]` Agendamento, reserva de slots e lista de espera
 
-- [ ] 7.1 `[V1]` Implementar BookingService com regras de negócio de agendamento
+- [x] 7.1 `[V1]` Implementar BookingService com regras de negócio de agendamento
   - `createAppointment()`: valida que slot não está no passado, respeita antecedência mínima e usa idempotencyKey para reprocessamento seguro
   - `cancelAppointment()`: valida que consulta é futura e respeita antecedência mínima de cancelamento
   - `rescheduleAppointment()`: cancela consulta existente e cria nova no slot selecionado
   - Ao criar/cancelar/confirmar/reagendar, publica eventos correspondentes para CalendarSyncService, WaitlistService e SSE EventBus
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.6, 5.7, 5.8, 5.10_
 
-- [ ] 7.2 `[V1]` (P) Implementar SlotReservationService com lock atômico Redis
+- [x] 7.2 `[V1]` (P) Implementar SlotReservationService com lock atômico Redis
   - `reserve()`: executa `SET slot:{slotId} {sessionId} NX EX {ttl=600s}`; retorna `SLOT_NOT_AVAILABLE` se já ocupado por outra sessão
   - `release()`: Lua script atômico que verifica ownership antes de deletar (previne liberação por terceiros)
   - `extend()`: renova TTL somente se sessionId corresponde ao owner atual
   - Garante que exatamente uma entre N requisições concorrentes pelo mesmo slot recebe confirmação
   - _Requirements: 5.1, 5.5_
 
-- [ ] 7.3 `[V1]` Implementar WaitlistService com notificação FIFO
+- [x] 7.3 `[V1]` Implementar WaitlistService com notificação FIFO
   - Adiciona paciente à lista quando nenhum slot disponível para a data desejada
   - Ao receber `AppointmentCancelled`: notifica próximo da fila FIFO via WhatsApp em ≤30s
   - Pula paciente com consulta confirmada no mesmo horário da vaga liberada
@@ -226,14 +226,14 @@
 
 ## 10. Frontend — Painel web Next.js 14
 
-- [ ] 10.1 `[V1]` Implementar fluxo de autenticação no frontend
+- [x] 10.1 `[V1]` Implementar fluxo de autenticação no frontend
   - Telas de registro, login (e-mail/senha e Google OAuth), verificação de e-mail e recuperação de senha
   - Configuração de 2FA: exibição de QR code, confirmação de código TOTP e exibição de recovery codes
   - Gestão de sessão com refresh automático de JWT via cookie HttpOnly; redirect para login em token expirado
   - Tela de vínculo de contas Google a perfil existente
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 11.1, 11.2, 11.3, 11.4, 11.5, 12.1, 12.2, 12.3, 12.4_
 
-- [ ] 10.2 `[V1]` (P) Implementar dashboard de agenda com atualizações em tempo real
+- [x] 10.2 `[V1]` (P) Implementar dashboard de agenda com atualizações em tempo real
   - Visualização diária e semanal com todos os agendamentos e status (confirmado, pendente, cancelado, no-show)
   - Indicadores visuais de ocupação por slot; carregamento inicial ≤2s em conexão padrão
   - SSE via Route Handler: recebe eventos do EventBus e atualiza UI em ≤5s sem reload de página
@@ -241,7 +241,7 @@
   - Layout responsivo funcional em smartphones e tablets sem aplicativo nativo
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, RNF-04_
 
-- [ ] 10.3 `[V1]` (P) Implementar tela de configuração de disponibilidade
+- [x] 10.3 `[V1]` (P) Implementar tela de configuração de disponibilidade
   - Configuração por dia da semana: ativar/desativar, horário de início/fim, duração de slot e intervalo entre consultas
   - Validação client-side e server-side; alterações propagadas ao Motor de IA em ≤5s após salvar
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
