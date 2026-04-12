@@ -57,6 +57,10 @@ export class AuthService {
       return err({ code: 'RATE_LIMITED', retryAfterSeconds });
     }
 
+    if (!professional.emailVerifiedAt) {
+      return err({ code: 'EMAIL_NOT_VERIFIED' });
+    }
+
     const passwordMatch = professional.passwordHash
       ? await this.hashing.compare(password, professional.passwordHash)
       : false;

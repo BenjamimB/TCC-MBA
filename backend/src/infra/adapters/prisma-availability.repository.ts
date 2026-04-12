@@ -18,7 +18,7 @@ export class PrismaAvailabilityRepository implements IAvailabilityRepository {
       slotDurationMinutes: r.slotDurationMinutes,
       breakDurationMinutes: r.breakDurationMinutes,
       isActive: r.isActive,
-      minAdvanceHours: (r as unknown as { minAdvanceHours?: number }).minAdvanceHours ?? 2,
+      minAdvanceHours: r.minAdvanceHours,
     }));
   }
 

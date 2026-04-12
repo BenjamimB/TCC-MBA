@@ -73,6 +73,7 @@ model Availability {
   slotDurationMinutes   Int
   breakDurationMinutes  Int      @default(0)
   isActive              Boolean  @default(true)
+  minAdvanceHours       Int      @default(2)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

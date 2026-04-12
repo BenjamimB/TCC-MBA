@@ -28,7 +28,7 @@ let PrismaAvailabilityRepository = class PrismaAvailabilityRepository {
             slotDurationMinutes: r.slotDurationMinutes,
             breakDurationMinutes: r.breakDurationMinutes,
             isActive: r.isActive,
-            minAdvanceHours: r.minAdvanceHours ?? 2,
+            minAdvanceHours: r.minAdvanceHours,
         }));
     }
     async upsert(professionalId, config) {

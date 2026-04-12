@@ -46,6 +46,9 @@ class AuthService {
             const retryAfterSeconds = Math.ceil((professional.lockedUntil.getTime() - now.getTime()) / 1000);
             return (0, result_1.err)({ code: 'RATE_LIMITED', retryAfterSeconds });
         }
+        if (!professional.emailVerifiedAt) {
+            return (0, result_1.err)({ code: 'EMAIL_NOT_VERIFIED' });
+        }
         const passwordMatch = professional.passwordHash
             ? await this.hashing.compare(password, professional.passwordHash)
             : false;
