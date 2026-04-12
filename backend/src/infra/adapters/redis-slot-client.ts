@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { IRedisSlotClient } from '../../booking/ports/redis-slot-client.port';
+import type { ISlotReservationChecker } from '../../schedule/ports/slot-reservation.port';
 import { RedisService } from '../redis.service';
 
 // Lua: deleta key somente se o valor for igual ao esperado
@@ -21,11 +22,11 @@ end
 `;
 
 @Injectable()
-export class RedisSlotClient implements IRedisSlotClient {
+export class RedisSlotClient implements IRedisSlotClient, ISlotReservationChecker {
   constructor(private readonly redis: RedisService) {}
 
   async setNxEx(key: string, value: string, ttlSeconds: number): Promise<boolean> {
-    const result = await this.redis.client.set(key, value, 'NX', 'EX', ttlSeconds);
+    const result = await this.redis.client.set(key, value, 'EX', ttlSeconds, 'NX');
     return result === 'OK';
   }
 
@@ -41,5 +42,11 @@ export class RedisSlotClient implements IRedisSlotClient {
   async atomicExpire(key: string, expectedValue: string, ttlSeconds: number): Promise<boolean> {
     const result = await this.redis.client.eval(EXTEND_SCRIPT, 1, key, expectedValue, String(ttlSeconds));
     return result === 1;
+  }
+
+  async isReserved(slotId: string): Promise<boolean> {
+    const key = `slot:${slotId}`;
+    const value = await this.redis.client.get(key);
+    return value !== null;
   }
 }

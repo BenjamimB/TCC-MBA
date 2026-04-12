@@ -38,7 +38,7 @@ export class PrismaPatientRepository implements IPatientRepository {
   }
 
   async update(id: string, data: UpdatePatientData): Promise<Patient> {
-    const row = await this.prisma.patient.update({ where: { id }, data });
+    const row = await this.prisma.patient.update({ where: { id }, data: data as never });
     return toPatient(row as unknown as Record<string, unknown>);
   }
 

@@ -1,0 +1,17 @@
+import * as Prisma from './internal/prismaNamespaceBrowser';
+export { Prisma };
+export * as $Enums from './enums';
+export * from './enums';
+export type Professional = Prisma.ProfessionalModel;
+export type OauthAccount = Prisma.OauthAccountModel;
+export type Availability = Prisma.AvailabilityModel;
+export type CalendarSync = Prisma.CalendarSyncModel;
+export type Patient = Prisma.PatientModel;
+export type Appointment = Prisma.AppointmentModel;
+export type WaitlistEntry = Prisma.WaitlistEntryModel;
+export type Conversation = Prisma.ConversationModel;
+export type Message = Prisma.MessageModel;
+export type InteractionRecord = Prisma.InteractionRecordModel;
+export type Subscription = Prisma.SubscriptionModel;
+export type Payment = Prisma.PaymentModel;
+export type AuditLog = Prisma.AuditLogModel;

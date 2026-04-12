@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { IAppointmentRepository, CreateAppointmentData } from '../../booking/ports/appointment.repository.port';
 import type { Appointment, AppointmentStatus } from '../../booking/booking.types';
+import type { BookedSlot, IAppointmentQuery } from '../../schedule/ports/appointment-query.port';
 import { PrismaService } from '../prisma.service';
 
 function toAppointment(row: Record<string, unknown>): Appointment {
@@ -19,7 +20,7 @@ function toAppointment(row: Record<string, unknown>): Appointment {
 }
 
 @Injectable()
-export class PrismaAppointmentRepository implements IAppointmentRepository {
+export class PrismaAppointmentRepository implements IAppointmentRepository, IAppointmentQuery {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(data: CreateAppointmentData): Promise<Appointment> {
@@ -69,5 +70,18 @@ export class PrismaAppointmentRepository implements IAppointmentRepository {
   async updateStatus(id: string, status: AppointmentStatus): Promise<Appointment> {
     const row = await this.prisma.appointment.update({ where: { id }, data: { status } });
     return toAppointment(row as unknown as Record<string, unknown>);
+  }
+
+  async findBookedSlots(professionalId: string, from: Date, to: Date): Promise<BookedSlot[]> {
+    const rows = await this.prisma.appointment.findMany({
+      where: {
+        professionalId,
+        startAt: { gte: from, lte: to },
+        status: { notIn: ['cancelled', 'no_show'] },
+      },
+      select: { startAt: true, endAt: true },
+      orderBy: { startAt: 'asc' },
+    });
+    return rows;
   }
 }

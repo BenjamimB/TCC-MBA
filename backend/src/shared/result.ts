@@ -17,7 +17,15 @@ export type DomainError =
   | { code: 'VALIDATION_ERROR'; fields: Record<string, string> }
   | { code: 'EXTERNAL_SERVICE_UNAVAILABLE'; service: string }
   | { code: 'UNAUTHORIZED' }
-  | { code: 'RATE_LIMITED'; retryAfterSeconds: number };
+  | { code: 'RATE_LIMITED'; retryAfterSeconds: number }
+  | { code: 'ALREADY_IN_WAITLIST' }
+  | { code: 'WAITLIST_ENTRY_NOT_FOUND'; id: string }
+  | { code: 'AI_UNAVAILABLE'; detail: string }
+  | { code: 'AI_CIRCUIT_OPEN'; provider: string }
+  | { code: 'AI_PROVIDER_ERROR'; provider: string; message: string }
+  | { code: 'UNSUPPORTED_PAYLOAD' }
+  | { code: 'INVALID_PAYLOAD' }
+  | { code: 'WHATSAPP_SEND_ERROR'; detail: string };
 
 export function ok<T>(value: T): Result<T, never> {
   return { ok: true, value };
