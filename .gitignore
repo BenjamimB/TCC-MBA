@@ -1,0 +1,3 @@
+# ZAP DAST scan artefacts (large / may contain sensitive endpoint details)
+security/zap-*.json
+security/zap-*.html
